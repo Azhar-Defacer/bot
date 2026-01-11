@@ -5,7 +5,7 @@ from time import sleep
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
-# Import tambahan untuk Chrome
+# Import khusus Chrome
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from webdriver_manager.chrome import ChromeDriverManager
@@ -23,11 +23,9 @@ class Bot:
         self.driver.get("https://zefoy.com")
         self._solve_captcha()
 
-        # Page refresh 1
+        # Page refresh untuk memastikan elemen termuat
         sleep(2)
         self.driver.refresh()
-
-        # Page refresh 2
         sleep(2)
         self.driver.refresh()
 
@@ -52,23 +50,30 @@ class Bot:
             print("[~] Loading Chrome driver, please wait...")
 
             options = ChromeOptions()
-            # Menghilangkan deteksi bot otomatis (agar lebih aman di Zefoy)
+            
+            # Perbaikan untuk Error 127 & Masalah Permission
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            
+            # Agar tidak terdeteksi sebagai bot
             options.add_argument("--disable-blink-features=AutomationControlled")
             options.add_experimental_option("excludeSwitches", ["enable-automation"])
             options.add_experimental_option('useAutomationExtension', False)
             
-            # Pengaturan ukuran jendela
             options.add_argument("--window-size=800,700")
 
-            # Otomatis download & setup chromedriver yang sesuai dengan versi Chrome Anda
+            # Menggunakan ChromeDriverManager untuk otomatisasi
             service = ChromeService(ChromeDriverManager().install())
             driver = webdriver.Chrome(options=options, service=service)
 
-            print("[+] Chrome driver loaded successfully")
-            print("\n")
+            # Bypass deteksi webdriver
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            print("[+] Chrome driver loaded successfully\n")
             return driver
         except Exception as e:
-            print("[x] Error loading driver: {}".format(e))
+            print(f"[x] Error loading driver: {e}")
+            print("[!] Pastikan Google Chrome sudah terinstal di komputer Anda.")
             exit(1)
 
     def _init_services(self):
@@ -83,9 +88,10 @@ class Bot:
         }
 
     def _solve_captcha(self):
+        print("[~] Please complete the captcha in the browser window")
         self._wait_for_element(By.TAG_NAME, "input")
-        print("[~] Please complete the captcha")
-        # Menunggu sampai input captcha hilang atau halaman berganti (ditandai adanya link Youtube)
+        
+        # Menunggu sampai user selesai captcha (halaman berubah dan muncul link Youtube)
         self._wait_for_element(By.LINK_TEXT, "Youtube")
         print("[+] Captcha completed successfully\n")
 
@@ -112,29 +118,28 @@ class Bot:
         while True:
             try:
                 choice = int(input("[~] Choose an option : "))
+                if 1 <= choice <= len(self.services):
+                    key = list(self.services.keys())[choice - 1]
+                    if self.services[key]["status"] == "[OFFLINE]":
+                        print("[!] Service offline, pilih yang lain.\n")
+                        continue
+                    print(f"[+] You have chosen {self.services[key]['title']}\n")
+                    break
+                else:
+                    print("[!] Angka tidak valid.\n")
             except ValueError:
-                print("[!] Invalid input format.\n")
-                continue
-
-            if choice in range(1, 8):
-                key = list(self.services.keys())[choice - 1]
-                if self.services[key]["status"] == "[OFFLINE]":
-                    print("[!] Service is offline. Choose another...\n")
-                    continue
-                print("[+] You have chosen {}\n".format(self.services[key]["title"]))
-                break
-            else:
-                print("[!] No service found with this number\n")
+                print("[!] Masukkan angka saja.\n")
         return key
 
     def _choose_video_url(self):
-        video_url = input("[~] Video URL : ")
+        url = input("[~] Video URL : ")
         print("\n")
-        return video_url
+        return url
 
     def _start_service(self, service, video_url):
         self._wait_for_element(By.CLASS_NAME, self.services[service]["selector"]).click()
-
+        
+        # Cari container input yang aktif
         container = self._wait_for_element(By.CSS_SELECTOR, "div.col-sm-5.col-xs-12.p-1.container:not(.nonec)")
 
         input_element = container.find_element(By.TAG_NAME, "input")
@@ -142,22 +147,24 @@ class Bot:
         input_element.send_keys(video_url)
 
         while True:
-            container.find_element(By.CSS_SELECTOR, "button.btn.btn-primary").click()
-            sleep(3)
-
             try:
+                # Klik tombol cari
+                container.find_element(By.CSS_SELECTOR, "button.btn.btn-primary").click()
+                sleep(3)
+
+                # Coba klik tombol submit/kirim
                 container.find_element(By.CSS_SELECTOR, "button.btn.btn-dark").click()
-                print("[~] {} sent successfully".format(self.services[service]["title"]))
+                print(f"[~] {self.services[service]['title']} sent successfully")
             except NoSuchElementException:
                 pass
 
             sleep(3)
             remaining_time = self._compute_remaining_time(container)
 
-            if remaining_time is not None:
+            if remaining_time:
                 minutes = remaining_time // 60
-                seconds = remaining_time - minutes * 60
-                print("[~] Sleeping for {} minutes {} seconds".format(minutes, seconds))
+                seconds = remaining_time % 60
+                print(f"[~] Waiting for {minutes}m {seconds}s...")
                 sleep(remaining_time)
             print("\n")
 
@@ -178,8 +185,7 @@ class Bot:
     def _wait_for_element(self, by, value):
         while True:
             try:
-                element = self.driver.find_element(by, value)
-                return element
+                return self.driver.find_element(by, value)
             except NoSuchElementException:
                 sleep(1)
 
